@@ -62,6 +62,10 @@ model User {
 
   referralsMade Referral[] @relation("ReferralsMade")
   referredBy    Referral?  @relation("ReferredBy")
+
+  createdGroups     GroupChat[]       @relation("CreatedGroups")
+  groupMemberships  GroupChatMember[]
+  sentGroupMessages GroupMessage[]    @relation("SentGroupMessages")
 }
 
 model Vault {
@@ -272,4 +276,40 @@ model Message {
 
   @@index([senderPubkey, recipientPubkey])
   @@index([recipientPubkey, senderPubkey])
+}
+
+model GroupChat {
+  id        String   @id @default(cuid())
+  name      String
+  createdBy String
+  createdAt DateTime @default(now())
+
+  creator  User              @relation("CreatedGroups", fields: [createdBy], references: [pubkey])
+  members  GroupChatMember[]
+  messages GroupMessage[]
+}
+
+model GroupChatMember {
+  id       String   @id @default(cuid())
+  groupId  String
+  pubkey   String
+  joinedAt DateTime @default(now())
+
+  group GroupChat @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User      @relation(fields: [pubkey], references: [pubkey])
+
+  @@unique([groupId, pubkey])
+}
+
+model GroupMessage {
+  id           String   @id @default(cuid())
+  groupId      String
+  senderPubkey String
+  body         String
+  createdAt    DateTime @default(now())
+
+  group  GroupChat @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sender User      @relation("SentGroupMessages", fields: [senderPubkey], references: [pubkey])
+
+  @@index([groupId, createdAt])
 }

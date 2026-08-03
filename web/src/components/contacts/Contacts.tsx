@@ -5,6 +5,10 @@ import { fetchContacts, addContact, removeContact, type Contact } from '@/lib/co
 import { RefreshIcon } from '@/app/icons';
 import ChatPanel from './ChatPanel';
 
+import GroupChatPanel from './GroupChatPanel';
+import NewGroupPanel from './NewGroupPanel';
+import { fetchGroups, type GroupChat } from '@/lib/groups';
+
 export default function Contacts({
   publicKey,
   onSendToContact,
@@ -23,6 +27,23 @@ export default function Contacts({
   const [addError, setAddError] = useState('');
 
   const [chattingWith, setChattingWith] = useState<{ pubkey: string; label: string } | null>(null);
+
+  const [groups, setGroups] = useState<GroupChat[]>([]);
+  const [showNewGroup, setShowNewGroup] = useState(false);
+  const [openGroup, setOpenGroup] = useState<{ id: string; name: string } | null>(null);
+
+  const refreshGroups = useCallback(async () => {
+    if (!publicKey) { setGroups([]); return; }
+    try {
+      setGroups(await fetchGroups());
+    } catch {
+      // non-critical, silent
+    }
+  }, [publicKey]);
+
+  useEffect(() => {
+    void refreshGroups();
+  }, [refreshGroups]);
 
   const refresh = useCallback(async () => {
     if (!publicKey) { setContacts([]); setLoading(false); setHasLoadedOnce(true); return; }
@@ -116,6 +137,36 @@ export default function Contacts({
             </button>
           </div>
 
+          <div className="flex items-center justify-between px-1">
+            <h4 className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Groups</h4>
+            <button
+              onClick={() => setShowNewGroup(true)}
+              className="text-[10px] uppercase tracking-wider text-[#FF5E00] font-semibold"
+            >
+              + New Group
+            </button>
+          </div>
+
+          {groups.length > 0 && (
+            <div className="space-y-2">
+              {groups.map((g) => (
+                <div
+                  key={g.id}
+                  onClick={() => setOpenGroup({ id: g.id, name: g.name })}
+                  className="p-4 rounded-2xl bg-white border border-slate-200/60 shadow-sm flex items-center gap-3 cursor-pointer"
+                >
+                  <div className="w-9 h-9 rounded-full bg-[#F3E8FF] text-[#9333EA] flex items-center justify-center shrink-0 font-bold text-xs">
+                    {g.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-slate-800 truncate">{g.name}</p>
+                    <p className="text-[10px] text-slate-400">{g.memberCount} members</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {listError && (
             <div className="rounded-xl bg-rose-50 border border-rose-100 px-3 py-2.5">
               <p className="text-xs font-medium text-rose-600 leading-normal">{listError}</p>
@@ -176,6 +227,32 @@ export default function Contacts({
             contactPubkey={chattingWith.pubkey}
             contactLabel={chattingWith.label}
             onClose={() => setChattingWith(null)}
+        />
+      )}
+
+      {showNewGroup && (
+        <NewGroupPanel
+          contacts={contacts}
+          onClose={() => setShowNewGroup(false)}
+          onCreated={(groupId, groupName) => {
+            setShowNewGroup(false);
+            void refreshGroups();
+            setOpenGroup({ id: groupId, name: groupName });
+          }}
+        />
+      )}
+
+      {openGroup && publicKey && (
+        <GroupChatPanel
+          publicKey={publicKey}
+          groupId={openGroup.id}
+          groupName={openGroup.name}
+          isAdmin={groups.find((g) => g.id === openGroup.id)?.createdBy === publicKey}
+          onClose={() => setOpenGroup(null)}
+          onLeft={() => {
+            setOpenGroup(null);
+            void refreshGroups();
+          }}
         />
       )}
     </div>
