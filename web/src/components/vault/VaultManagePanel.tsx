@@ -785,6 +785,9 @@ export default function VaultManagePanel({ vault, isOwned, isMemberOnly, publicK
                 {pendingWithdrawalRequest.approvals.length} / {withdrawalMajorityCount} approvals
               </p>
 
+              {/* Withdrawal PIN re-auth — must render independent of pendingWithdrawalRequest,
+                  since a session-key expiry can happen on the initial "request" action too,
+                  before any WithdrawalRequest exists yet. */}
               {withdrawalNeedsPin && (
                 <div className="rounded-lg border border-slate-100 bg-white p-3 space-y-2">
                   <p className="text-[9px] uppercase tracking-wider text-slate-400 font-light">
