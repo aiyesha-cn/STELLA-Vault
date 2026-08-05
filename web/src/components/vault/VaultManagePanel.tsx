@@ -275,7 +275,7 @@ export default function VaultManagePanel({ vault, isOwned, isMemberOnly, publicK
     setRequesting(true);
     setRequestError('');
     try {
-      const xdr = await buildRequestWithdrawalXDR(vault.ownerPubkey, vault.onChainVaultId, recipient, amount);
+      const xdr = await buildRequestWithdrawalXDR(publicKey, vault.onChainVaultId, recipient, amount);
       const signedXdr = await signWithCurrentAccount(xdr);
       const hash = await submitSignedXDR(signedXdr);
       const returnValue = await pollTransactionForResult(hash);
@@ -312,7 +312,7 @@ export default function VaultManagePanel({ vault, isOwned, isMemberOnly, publicK
     setWithdrawalBusy(request.id);
     setWithdrawalActionError('');
     try {
-      const xdr = await buildApproveWithdrawalXDR(vault.ownerPubkey, vault.onChainVaultId, request.onChainRequestId);
+      const xdr = await buildApproveWithdrawalXDR(publicKey, vault.onChainVaultId, request.onChainRequestId);
       const signedXdr = await signWithCurrentAccount(xdr);
       const hash = await submitSignedXDR(signedXdr);
       await pollTransaction(hash);
@@ -340,7 +340,7 @@ export default function VaultManagePanel({ vault, isOwned, isMemberOnly, publicK
     setWithdrawalBusy(request.id);
     setWithdrawalActionError('');
     try {
-      const xdr = await buildExecuteWithdrawalXDR(vault.ownerPubkey, vault.onChainVaultId, request.onChainRequestId);
+      const xdr = await buildExecuteWithdrawalXDR(publicKey, vault.onChainVaultId, request.onChainRequestId);
       const signedXdr = await signWithCurrentAccount(xdr);
       const hash = await submitSignedXDR(signedXdr);
       await pollTransaction(hash);
@@ -785,43 +785,6 @@ export default function VaultManagePanel({ vault, isOwned, isMemberOnly, publicK
                 {pendingWithdrawalRequest.approvals.length} / {withdrawalMajorityCount} approvals
               </p>
 
-              {/* Withdrawal PIN re-auth — must render independent of pendingWithdrawalRequest,
-                  since a session-key expiry can happen on the initial "request" action too,
-                  before any WithdrawalRequest exists yet. */}
-              {withdrawalNeedsPin && (
-                <div className="rounded-lg border border-slate-100 bg-white p-3 space-y-2">
-                  <p className="text-[9px] uppercase tracking-wider text-slate-400 font-light">
-                    Enter PIN to continue
-                  </p>
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    value={withdrawalPinInput}
-                    onChange={(e) => setWithdrawalPinInput(e.target.value)}
-                    placeholder="••••"
-                    disabled={withdrawalUnlocking}
-                    className="w-full rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 text-xs outline-none focus:border-[#A0F0F0] disabled:opacity-50"
-                  />
-                  {withdrawalPinError && <p className="text-[9px] text-rose-500">{withdrawalPinError}</p>}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleWithdrawalUnlockAndRetry}
-                      disabled={withdrawalUnlocking || !withdrawalPinInput}
-                      className="flex-1 py-2 rounded-lg bg-linear-to-r from-[#FF9F1C] to-[#F37A00] text-white text-[10px] uppercase tracking-wider font-normal disabled:opacity-40"
-                    >
-                      {withdrawalUnlocking ? 'Unlocking…' : 'Unlock & continue'}
-                    </button>
-                    <button
-                      onClick={() => { setWithdrawalNeedsPin(false); setWithdrawalPinInput(''); setWithdrawalPinError(''); setPendingWithdrawalAction(null); }}
-                      disabled={withdrawalUnlocking}
-                      className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-100 text-[10px] uppercase tracking-wide text-slate-400"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-
               {!withdrawalNeedsPin && (
                 <div className="flex gap-2 pt-1">
                   {!pendingWithdrawalRequest.approvals.some((a) => a.pubkey === publicKey) && (
@@ -842,6 +805,47 @@ export default function VaultManagePanel({ vault, isOwned, isMemberOnly, publicK
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Withdrawal PIN re-auth — sibling of the pending-request card above, not
+              nested inside it, since a session-key expiry can happen on the initial
+              "request" action too, before any WithdrawalRequest exists yet. Nesting
+              this inside `pendingWithdrawalRequest && (...)` meant the PIN prompt
+              silently failed to render for that case: signWithCurrentAccount would
+              throw, withdrawalNeedsPin would flip to true, but its container never
+              mounted, so the UI looked like nothing had happened. */}
+          {withdrawalNeedsPin && (
+            <div className="rounded-lg border border-slate-100 bg-white p-3 space-y-2">
+              <p className="text-[9px] uppercase tracking-wider text-slate-400 font-light">
+                Enter PIN to continue
+              </p>
+              <input
+                type="password"
+                inputMode="numeric"
+                value={withdrawalPinInput}
+                onChange={(e) => setWithdrawalPinInput(e.target.value)}
+                placeholder="••••"
+                disabled={withdrawalUnlocking}
+                className="w-full rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 text-xs outline-none focus:border-[#A0F0F0] disabled:opacity-50"
+              />
+              {withdrawalPinError && <p className="text-[9px] text-rose-500">{withdrawalPinError}</p>}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleWithdrawalUnlockAndRetry}
+                  disabled={withdrawalUnlocking || !withdrawalPinInput}
+                  className="flex-1 py-2 rounded-lg bg-linear-to-r from-[#FF9F1C] to-[#F37A00] text-white text-[10px] uppercase tracking-wider font-normal disabled:opacity-40"
+                >
+                  {withdrawalUnlocking ? 'Unlocking…' : 'Unlock & continue'}
+                </button>
+                <button
+                  onClick={() => { setWithdrawalNeedsPin(false); setWithdrawalPinInput(''); setWithdrawalPinError(''); setPendingWithdrawalAction(null); }}
+                  disabled={withdrawalUnlocking}
+                  className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-100 text-[10px] uppercase tracking-wide text-slate-400"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           )}
         </div>
