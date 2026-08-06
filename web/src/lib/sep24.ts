@@ -75,3 +75,82 @@ export async function getAssetTransferInfo(
     withdrawMax: withdraw?.max_amount ?? null,
   };
 }
+
+export interface InteractiveSession {
+  /** URL to open in a popup (web) or in-app browser view (Expo, later). */
+  url: string;
+  /** Transaction id to poll via GET /transaction?id=... until it completes. */
+  id: string;
+}
+
+interface Sep24InteractiveResponse {
+  type: string; // expected 'interactive_customer_info_needed'
+  url: string;
+  id: string;
+}
+
+/** Joins a SEP-24 base URL with a path segment, without dropping the base's
+ *  own path (see the /info bug this pattern was extracted to avoid). */
+function sep24Url(base: string, path: string): URL {
+  const withTrailingSlash = base.endsWith('/') ? base : `${base}/`;
+  return new URL(path, withTrailingSlash);
+}
+
+async function startInteractiveSession(
+  anchor: AnchorConfig,
+  account: string,
+  assetCode: string,
+  kind: 'deposit' | 'withdraw',
+): Promise<InteractiveSession> {
+  const token = await authenticateWithAnchor(anchor, account);
+
+  const body = new URLSearchParams({
+    asset_code: assetCode,
+    account,
+  });
+
+  const url = sep24Url(anchor.transferServerSep24, `transactions/${kind}/interactive`);
+  const res = await fetch(url.toString(), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: body.toString(),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    throw new Error(`SEP-24 ${kind} interactive session request failed: ${res.status} ${errBody}`);
+  }
+
+  const data = (await res.json()) as Sep24InteractiveResponse;
+  if (!data.url || !data.id) {
+    throw new Error(`SEP-24 ${kind} interactive session response missing url or id`);
+  }
+
+  return { url: data.url, id: data.id };
+}
+
+/**
+ * SEP-24 step 3 (deposit): opens an interactive KYC/deposit-instructions
+ * session with the anchor. Caller is responsible for opening the returned
+ * `url` (popup on web, in-app browser view on Expo later) and then polling
+ * `getTransactionStatus(anchor, account, id)` until it settles.
+ */
+export async function startDepositSession(
+  anchor: AnchorConfig,
+  account: string,
+  assetCode: string,
+): Promise<InteractiveSession> {
+  return startInteractiveSession(anchor, account, assetCode, 'deposit');
+}
+
+/** SEP-24 step 3 (withdraw): same shape as startDepositSession, for withdrawals. */
+export async function startWithdrawSession(
+  anchor: AnchorConfig,
+  account: string,
+  assetCode: string,
+): Promise<InteractiveSession> {
+  return startInteractiveSession(anchor, account, assetCode, 'withdraw');
+}
