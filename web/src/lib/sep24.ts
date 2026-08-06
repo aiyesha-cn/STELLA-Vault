@@ -104,19 +104,18 @@ async function startInteractiveSession(
 ): Promise<InteractiveSession> {
   const token = await authenticateWithAnchor(anchor, account);
 
-  const body = new URLSearchParams({
-    asset_code: assetCode,
-    account,
-  });
-
   const url = sep24Url(anchor.transferServerSep24, `transactions/${kind}/interactive`);
   const res = await fetch(url.toString(), {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Type': 'application/json',
     },
-    body: body.toString(),
+    // NOTE: the SEP-24 spec's reference examples show
+    // application/x-www-form-urlencoded, but testanchor.stellar.org actually
+    // rejects that content type ("is not supported") and requires JSON.
+    // Confirmed live against the real anchor before trusting this.
+    body: JSON.stringify({ asset_code: assetCode, account }),
   });
 
   if (!res.ok) {
