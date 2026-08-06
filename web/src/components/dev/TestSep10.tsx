@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { discoverAnchor } from '@/lib/anchor';
 import { authenticateWithAnchor } from '@/lib/sep10';
-import { getAssetTransferInfo } from '@/lib/sep24';
+import { getAssetTransferInfo, startDepositSession } from '@/lib/sep24';
 
 /**
  * Dev-only panel for manually verifying the SEP-10 auth round trip and the
@@ -15,6 +15,7 @@ export default function TestSep10({ publicKey }: { publicKey: string | null }) {
   const [log, setLog] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
   const [infoRunning, setInfoRunning] = useState(false);
+  const [depositRunning, setDepositRunning] = useState(false);
 
   const append = (line: string) => setLog((prev) => [...prev, line]);
 
@@ -70,13 +71,36 @@ export default function TestSep10({ publicKey }: { publicKey: string | null }) {
     }
   };
 
+  const runDeposit = async () => {
+    if (!publicKey) {
+      append('No public key available — make sure a wallet/session is active.');
+      return;
+    }
+    setDepositRunning(true);
+    try {
+      append('--- SEP-24 startDepositSession test ---');
+      append('Discovering anchor...');
+      const anchor = await discoverAnchor();
+
+      append('Starting interactive deposit session (will reuse cached JWT if available)...');
+      const session = await startDepositSession(anchor, publicKey, 'USDC');
+      append(`Deposit session: ${JSON.stringify(session, null, 2)}`);
+      append('Opening session.url in a new tab — complete the anchor form there, then come back.');
+      window.open(session.url, '_blank', 'noopener,noreferrer');
+    } catch (e: unknown) {
+      append(`ERROR: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDepositRunning(false);
+    }
+  };
+
   if (process.env.NODE_ENV === 'production') return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 max-w-md rounded-xl border border-slate-200 bg-white p-4 shadow-lg text-xs">
-      <div className="flex items-center justify-between mb-2 gap-2">
+    <div className="fixed bottom-4 right-4 z-50 max-w-lg rounded-xl border border-slate-200 bg-white p-4 shadow-lg text-xs">
+      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
         <span className="font-semibold text-slate-600">SEP-10/24 Dev Test</span>
-        <div className="flex gap-1.5">
+        <div className="flex gap-1.5 flex-wrap">
           <button
             onClick={run}
             disabled={running}
@@ -90,6 +114,13 @@ export default function TestSep10({ publicKey }: { publicKey: string | null }) {
             className="rounded-lg bg-slate-600 text-white px-3 py-1 disabled:opacity-50"
           >
             {infoRunning ? 'Running…' : 'Run /info'}
+          </button>
+          <button
+            onClick={runDeposit}
+            disabled={depositRunning}
+            className="rounded-lg bg-cyan-600 text-white px-3 py-1 disabled:opacity-50"
+          >
+            {depositRunning ? 'Running…' : 'Run Deposit'}
           </button>
         </div>
       </div>
