@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { discoverAnchor } from '@/lib/anchor';
 import { authenticateWithAnchor } from '@/lib/sep10';
-import { getAssetTransferInfo, startDepositSession } from '@/lib/sep24';
+import { getAssetTransferInfo, startDepositSession, getTransactionStatus } from '@/lib/sep24';
 
 /**
  * Dev-only panel for manually verifying the SEP-10 auth round trip and the
@@ -16,6 +16,8 @@ export default function TestSep10({ publicKey }: { publicKey: string | null }) {
   const [running, setRunning] = useState(false);
   const [infoRunning, setInfoRunning] = useState(false);
   const [depositRunning, setDepositRunning] = useState(false);
+  const [statusRunning, setStatusRunning] = useState(false);
+  const [txnIdInput, setTxnIdInput] = useState('0f4487eb-8e5a-4704-a3e0-3b0c35cb9934');
 
   const append = (line: string) => setLog((prev) => [...prev, line]);
 
@@ -94,6 +96,31 @@ export default function TestSep10({ publicKey }: { publicKey: string | null }) {
     }
   };
 
+  const runStatus = async () => {
+    if (!publicKey) {
+      append('No public key available — make sure a wallet/session is active.');
+      return;
+    }
+    if (!txnIdInput.trim()) {
+      append('Enter a transaction id first.');
+      return;
+    }
+    setStatusRunning(true);
+    try {
+      append('--- SEP-24 getTransactionStatus test ---');
+      append('Discovering anchor...');
+      const anchor = await discoverAnchor();
+
+      append(`Fetching status for transaction ${txnIdInput.trim()}...`);
+      const txn = await getTransactionStatus(anchor, publicKey, txnIdInput.trim());
+      append(`Transaction: ${JSON.stringify(txn, null, 2)}`);
+    } catch (e: unknown) {
+      append(`ERROR: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setStatusRunning(false);
+    }
+  };
+
   if (process.env.NODE_ENV === 'production') return null;
 
   return (
@@ -122,8 +149,22 @@ export default function TestSep10({ publicKey }: { publicKey: string | null }) {
           >
             {depositRunning ? 'Running…' : 'Run Deposit'}
           </button>
+          <button
+            onClick={runStatus}
+            disabled={statusRunning}
+            className="rounded-lg bg-indigo-600 text-white px-3 py-1 disabled:opacity-50"
+          >
+            {statusRunning ? 'Running…' : 'Run Status'}
+          </button>
         </div>
       </div>
+      <input
+        type="text"
+        value={txnIdInput}
+        onChange={(e) => setTxnIdInput(e.target.value)}
+        placeholder="transaction id to check"
+        className="w-full mb-2 rounded-lg border border-slate-200 px-2 py-1 text-[10px] font-mono"
+      />
       <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-[10px] text-slate-500">
         {log.join('\n\n')}
       </pre>
