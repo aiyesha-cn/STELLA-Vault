@@ -145,11 +145,141 @@ export async function startDepositSession(
   return startInteractiveSession(anchor, account, assetCode, 'deposit');
 }
 
-/** SEP-24 step 3 (withdraw): same shape as startDepositSession, for withdrawals. */
+/** SEP-24 withdraw is the mirror of startDepositSession, for withdrawals. */
 export async function startWithdrawSession(
   anchor: AnchorConfig,
   account: string,
   assetCode: string,
 ): Promise<InteractiveSession> {
   return startInteractiveSession(anchor, account, assetCode, 'withdraw');
+}
+
+// Statuses per SEP-24 spec. Anchors may not use every value, but these are
+// the ones the spec defines as terminal vs. in-progress.
+export type Sep24TransactionStatus =
+  | 'incomplete'
+  | 'pending_user_transfer_start'
+  | 'pending_user_transfer_complete'
+  | 'pending_external'
+  | 'pending_anchor'
+  | 'pending_stellar'
+  | 'pending_trust'
+  | 'pending_user'
+  | 'completed'
+  | 'refunded'
+  | 'expired'
+  | 'no_market'
+  | 'too_small'
+  | 'too_large'
+  | 'error';
+
+export interface Sep24Transaction {
+  id: string;
+  kind: 'deposit' | 'withdrawal';
+  status: Sep24TransactionStatus;
+  moreInfoUrl: string | null;
+  startedAt: string | null;
+  refunded: boolean;
+  to: string | null;
+  amountIn: number | null;
+  amountOut: number | null;
+  stellarTransactionId: string | null;
+}
+
+interface Sep24TransactionResponse {
+  transaction: {
+    id: string;
+    kind: 'deposit' | 'withdrawal';
+    status: Sep24TransactionStatus;
+    more_info_url?: string;
+    started_at?: string;
+    refunded?: boolean;
+    to?: string;
+    amount_in?: string;
+    amount_out?: string;
+    stellar_transaction_id?: string;
+  };
+}
+
+/**
+ * SEP-24 step 5: fetch the current state of a transaction started via
+ * startDepositSession/startWithdrawSession. The live anchor response nests
+ * the transaction under a `transaction` key (confirmed against
+ * testanchor.stellar.org) — not a flat object as some docs imply.
+ */
+export async function getTransactionStatus(
+  anchor: AnchorConfig,
+  account: string,
+  transactionId: string,
+): Promise<Sep24Transaction> {
+  const token = await authenticateWithAnchor(anchor, account);
+
+  const url = sep24Url(anchor.transferServerSep24, 'transaction');
+  url.searchParams.set('id', transactionId);
+
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`SEP-24 transaction status request failed: ${res.status} ${body}`);
+  }
+
+  const data = (await res.json()) as Sep24TransactionResponse;
+  const txn = data.transaction;
+  if (!txn?.id) {
+    throw new Error('SEP-24 transaction status response missing transaction.id');
+  }
+
+  return {
+    id: txn.id,
+    kind: txn.kind,
+    status: txn.status,
+    moreInfoUrl: txn.more_info_url ?? null,
+    startedAt: txn.started_at ?? null,
+    refunded: txn.refunded ?? false,
+    to: txn.to ?? null,
+    amountIn: txn.amount_in ? Number(txn.amount_in) : null,
+    amountOut: txn.amount_out ? Number(txn.amount_out) : null,
+    stellarTransactionId: txn.stellar_transaction_id ?? null,
+  };
+}
+
+const TERMINAL_STATUSES: Sep24TransactionStatus[] = [
+  'completed',
+  'refunded',
+  'expired',
+  'no_market',
+  'too_small',
+  'too_large',
+  'error',
+];
+
+/**
+ * Polls getTransactionStatus until the transaction reaches a terminal state
+ * (completed, refunded, expired, or an error status), or until timeoutMs is
+ * exceeded. Does not distinguish success from failure terminal states —
+ * caller should check the returned `status`.
+ */
+export async function pollTransactionUntilTerminal(
+  anchor: AnchorConfig,
+  account: string,
+  transactionId: string,
+  options: { intervalMs?: number; timeoutMs?: number } = {},
+): Promise<Sep24Transaction> {
+  const intervalMs = options.intervalMs ?? 3000;
+  const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000;
+  const deadline = Date.now() + timeoutMs;
+
+  while (true) {
+    const txn = await getTransactionStatus(anchor, account, transactionId);
+    if (TERMINAL_STATUSES.includes(txn.status)) {
+      return txn;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`Timed out waiting for transaction ${transactionId} to reach a terminal state (last status: ${txn.status})`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
 }
