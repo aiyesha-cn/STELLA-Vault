@@ -39,7 +39,14 @@ export async function getAssetTransferInfo(
 ): Promise<AssetTransferInfo> {
   const token = await authenticateWithAnchor(anchor, account);
 
-  const infoUrl = new URL('/info', anchor.transferServerSep24);
+  // NOTE: new URL('/info', base) with a leading slash discards base's own
+  // path (e.g. '/sep24'), resolving against the origin instead. Ensure the
+  // base has a trailing slash and use a relative (no leading slash) path so
+  // it correctly appends rather than replaces.
+  const base = anchor.transferServerSep24.endsWith('/')
+    ? anchor.transferServerSep24
+    : `${anchor.transferServerSep24}/`;
+  const infoUrl = new URL('info', base);
   const res = await fetch(infoUrl.toString(), {
     headers: { Authorization: `Bearer ${token}` },
   });
