@@ -5,6 +5,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { fetchBalances, type Balances } from '@/lib/balances';
 import { walletService, authFetch } from '@/lib/wallet';
+import { discoverAnchor } from '@/lib/anchor';
+import { getAssetTransferInfo, startDepositSession, pollTransactionUntilTerminal } from '@/lib/sep24';
 import {
   contractConfigured,
   readSavingsState,
@@ -159,6 +161,10 @@ export default function SavingsDashboard({ publicKey, wallet, onLogout, headerAc
 
   // Form & Action states
   const [depositAmount, setDepositAmount] = useState('250');
+  const [bankDepositBusy, setBankDepositBusy] = useState(false);
+  const [bankDepositError, setBankDepositError] = useState('');
+  const [bankDepositStatus, setBankDepositStatus] = useState('');
+  const [bankDepositLimits, setBankDepositLimits] = useState<{ min: number | null; max: number | null } | null>(null);
   const [withdrawAmount, setWithdrawAmount] = useState('50');
   const [recipient, setRecipient] = useState('');
   const [transferAmount, setTransferAmount] = useState('');
@@ -374,6 +380,52 @@ export default function SavingsDashboard({ publicKey, wallet, onLogout, headerAc
     }
   };
 
+  useEffect(() => {
+  if (panel !== 'deposit' || !publicKey) return;
+  let ignore = false;
+  (async () => {
+    try {
+      const anchor = await discoverAnchor();
+      const info = await getAssetTransferInfo(anchor, publicKey, 'USDC');
+      if (!ignore) setBankDepositLimits({ min: info.depositMin, max: info.depositMax });
+    } catch {
+      if (!ignore) setBankDepositLimits(null);
+    }
+  })();
+  return () => { ignore = true; };
+}, [panel, publicKey]);
+
+const handleStartBankDeposit = async () => {
+  if (!publicKey) return;
+  setBankDepositBusy(true);
+  setBankDepositError('');
+  setBankDepositStatus('');
+  try {
+    const anchor = await discoverAnchor();
+    const session = await startDepositSession(anchor, publicKey, 'USDC');
+    window.open(session.url, '_blank', 'noopener,noreferrer');
+    setBankDepositStatus('Complete the deposit form in the new tab, then come back here.');
+
+    pollTransactionUntilTerminal(anchor, publicKey, session.id, { intervalMs: 5000, timeoutMs: 10 * 60 * 1000 })
+      .then((txn) => {
+        if (txn.status === 'completed') {
+          setBankDepositStatus('Deposit completed — refreshing your balance…');
+          void refresh();
+          void refreshHistory(publicKey);
+        } else {
+          setBankDepositStatus(`Deposit ended with status: ${txn.status}`);
+        }
+      })
+      .catch((e: unknown) => {
+        setBankDepositError(e instanceof Error ? e.message : 'Lost track of the deposit status.');
+      });
+  } catch (e: unknown) {
+    setBankDepositError(e instanceof Error ? e.message : 'Failed to start bank deposit');
+  } finally {
+    setBankDepositBusy(false);
+  }
+};
+
   const handleTransferRequest = async (category?: string) => {
     if (!publicKey || !recipient || !transferAmount) return;
     setTransferCategory(category);
@@ -517,6 +569,11 @@ export default function SavingsDashboard({ publicKey, wallet, onLogout, headerAc
                   phpRate={phpRate} busy={busy} loading={loading}
                   depositAmount={depositAmount} onDepositAmountChange={setDepositAmount}
                   onDeposit={handleDeposit}
+                  bankBusy={bankDepositBusy}
+                  bankError={bankDepositError}
+                  bankStatus={bankDepositStatus}
+                  bankLimits={bankDepositLimits}
+                  onStartBankDeposit={handleStartBankDeposit}
                 />
               )}
 
